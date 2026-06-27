@@ -1,10 +1,9 @@
-import { useEffect, useRef } from "react";
-import StatusBadge from "./StatusBadge.jsx";
-import ReasonTags from "./ReasonTags.jsx";
+import { memo, useEffect, useRef } from "react";
 
-// 감독관 대시보드의 응시자 타일. stream(원격 MediaStream)이 있으면 영상 표시.
-export default function CandidateTile({ name, tier, score, tags, stream }) {
+// 감독관 대시보드의 응시자 영상 타일 (Discord 통화 참가자 스타일).
+function CandidateTile({ id, name, tier, score, tags, stream, onSelect }) {
   const ref = useRef(null);
+  const t = ["green", "yellow", "red"].includes(tier) ? tier : "green";
 
   useEffect(() => {
     if (ref.current && stream && ref.current.srcObject !== stream) {
@@ -13,19 +12,32 @@ export default function CandidateTile({ name, tier, score, tags, stream }) {
   }, [stream]);
 
   return (
-    <div className={`tile ${tier} ${tier === "red" ? "pulse" : ""}`}>
-      <div className="tile-head">
-        <span className="name">{name}</span>
-        <StatusBadge tier={tier} score={score} />
+    <div className={`vtile ${t} clickable`} onClick={() => onSelect(id)} title="클릭하면 확대">
+      <span className="vtile-expand">⤢</span>
+      {stream ? (
+        <video ref={ref} muted playsInline autoPlay className="cam" />
+      ) : (
+        <div className="cam mock">
+          <span className="dot" /> 연결 대기…
+        </div>
+      )}
+
+      {tags && tags.length > 0 && (
+        <div className="vtile-tags">
+          {tags.slice(0, 2).map((x, i) => (
+            <span key={i}>{x}</span>
+          ))}
+        </div>
+      )}
+
+      <span className={`vtile-score ${t}`}>{score}</span>
+
+      <div className="vtile-bottom">
+        <i className={`dot ${t}`} />
+        <span className="nm">{name}</span>
       </div>
-      <div className="tile-video">
-        {stream ? (
-          <video ref={ref} muted playsInline autoPlay className="cam" />
-        ) : (
-          <div className="cam mock">연결 대기…</div>
-        )}
-      </div>
-      <ReasonTags tags={tags} />
     </div>
   );
 }
+
+export default memo(CandidateTile);

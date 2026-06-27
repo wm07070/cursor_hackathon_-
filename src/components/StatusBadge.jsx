@@ -1,13 +1,14 @@
 const MAP = {
-  green: { label: "정상", cls: "badge green" },
-  yellow: { label: "주의", cls: "badge yellow" },
-  red: { label: "경고", cls: "badge red" },
+  green: "정상",
+  yellow: "주의",
+  red: "경고",
 };
 export default function StatusBadge({ tier, score }) {
-  const m = MAP[tier] ?? MAP.green;
+  const t = MAP[tier] ? tier : "green";
   return (
-    <span className={m.cls}>
-      {m.label} · {score}
+    <span className={`badge ${t}`}>
+      <i className="dot" />
+      {MAP[t]} · {score}
     </span>
   );
 }

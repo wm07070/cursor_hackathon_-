@@ -30,9 +30,16 @@ export default function CandidateView({ name }) {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: "user" },
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 20, max: 24 },
+            facingMode: "user",
+          },
           audio: false,
         });
+        // 인코더가 프레임레이트보다 부드러움 유지를 우선하도록 힌트
+        stream.getVideoTracks().forEach((t) => (t.contentHint = "motion"));
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -63,6 +70,22 @@ export default function CandidateView({ name }) {
       };
       pc.onconnectionstatechange = () =>
         setConnected(pc.connectionState === "connected");
+
+      // 다중 접속 시 와이파이/디코딩 포화 방지: 비트레이트·프레임레이트 상한 + 부하 시 해상도 자동 강하
+      const sender = pc.getSenders().find((s) => s.track && s.track.kind === "video");
+      if (sender) {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        params.encodings[0].maxBitrate = 350_000; // ~350kbps
+        params.encodings[0].maxFramerate = 20;
+        params.degradationPreference = "balanced";
+        try {
+          await sender.setParameters(params);
+        } catch (e) {
+          console.warn("sender 파라미터 설정 실패", e);
+        }
+      }
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       socket.emit("rtc:offer", { sdp: pc.localDescription });
@@ -107,26 +130,31 @@ export default function CandidateView({ name }) {
         setError(`얼굴 인식 모델 로딩 실패: ${e.message}`);
         return;
       }
+      // 분석은 ~10fps면 충분. 매 프레임 추론하면 영상 인코더가 굶어 끊김 발생.
+      const DETECT_INTERVAL = 100;
+      let lastInfer = 0;
       const loop = () => {
         if (stopped) return;
-        const video = videoRef.current;
-        if (video && video.readyState >= 2) {
-          const ts = performance.now();
-          const frame = detectFrame(landmarker, video, ts);
-          if (!calibrator.ready) {
-            calibrator.feed(frame, ts);
-            setCalibProgress(calibrator.progress(ts));
-            if (calibrator.ready) setCalibrating(false);
-          } else {
-            const signals = track(frame, calibrator.baseline, ts, manualRef.current);
-            const score = computeScore(signals);
-            const t = tier(score);
-            const tags = reasonTags(signals);
-            latestRef.current = { score, tier: t, tags };
-            setState({ score, tier: t, tags });
-          }
-        }
         raf = requestAnimationFrame(loop);
+        const video = videoRef.current;
+        if (!video || video.readyState < 2) return;
+        const ts = performance.now();
+        if (ts - lastInfer < DETECT_INTERVAL) return;
+        lastInfer = ts;
+
+        const frame = detectFrame(landmarker, video, ts);
+        if (!calibrator.ready) {
+          calibrator.feed(frame, ts);
+          setCalibProgress(calibrator.progress(ts));
+          if (calibrator.ready) setCalibrating(false);
+        } else {
+          const signals = track(frame, calibrator.baseline, ts, manualRef.current);
+          const score = computeScore(signals);
+          const t = tier(score);
+          const tags = reasonTags(signals);
+          latestRef.current = { score, tier: t, tags };
+          setState({ score, tier: t, tags });
+        }
       };
       loop();
     })();
@@ -158,14 +186,16 @@ export default function CandidateView({ name }) {
 
   return (
     <div className="candidate-wrap">
-      {error && <div className="error">웹캠 접근 실패: {error}</div>}
-
       <div className="candidate-card">
+        {error && <div className="error">{error}</div>}
+
         <div className="candidate-head">
           <div className="brand">
-            ExamGuard <span className="sub">· 응시자</span>
+            <div className="logo">EG</div>
+            ExamGuard
           </div>
           <span className={`conn ${connected ? "on" : ""}`}>
+            <i className="dot" />
             {connected ? "감독관 연결됨" : "연결 대기"}
           </span>
         </div>
