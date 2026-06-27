@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { RTC_CONF } from "../rtc/config.js";
 import { createFaceLandmarker, detectFrame } from "../detection/faceLandmarker.js";
@@ -15,6 +15,8 @@ export default function CandidateView({ name }) {
   const pcRef = useRef(null);
   const latestRef = useRef({ score: 0, tier: "green", tags: [] });
   const manualRef = useRef({ glasses: false, capture: false });
+  const awayRef = useRef(false);
+  const [away, setAway] = useState(false);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
@@ -166,17 +168,45 @@ export default function CandidateView({ name }) {
     };
   }, [ready]);
 
+  // 점수 전송 (탭 이탈 시 강제 경고 오버라이드)
+  const AWAY_TAG = "화면 이탈(탭 전환)";
+  const sendScore = useCallback(() => {
+    const s = socketRef.current;
+    if (!s || !s.connected) return;
+    let { score, tier: t, tags } = latestRef.current;
+    if (awayRef.current) {
+      score = Math.max(score, 75);
+      t = "red";
+      tags = [AWAY_TAG, ...tags.filter((x) => x !== AWAY_TAG)].slice(0, 3);
+    }
+    s.emit("score", { name, score, tier: t, tags, away: awayRef.current });
+  }, [name]);
+
   // 4) 점수 주기 전송
   useEffect(() => {
-    const iv = setInterval(() => {
-      const s = socketRef.current;
-      if (s && s.connected) {
-        const { score, tier, tags } = latestRef.current;
-        s.emit("score", { name, score, tier, tags });
-      }
-    }, 400);
+    const iv = setInterval(sendScore, 500);
     return () => clearInterval(iv);
-  }, [name]);
+  }, [sendScore]);
+
+  // 5) 탭/창 이탈 감지 (다른 탭·앱으로 전환 시 즉시 경고)
+  useEffect(() => {
+    const update = () => {
+      const isAway = document.hidden || !document.hasFocus();
+      if (isAway !== awayRef.current) {
+        awayRef.current = isAway;
+        setAway(isAway);
+        sendScore(); // 루프가 멈춰도 즉시 반영
+      }
+    };
+    document.addEventListener("visibilitychange", update);
+    window.addEventListener("blur", update);
+    window.addEventListener("focus", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      window.removeEventListener("blur", update);
+      window.removeEventListener("focus", update);
+    };
+  }, [sendScore]);
 
   const toggle = (k) => {
     const next = { ...manualRef.current, [k]: !manualRef.current[k] };
@@ -186,8 +216,11 @@ export default function CandidateView({ name }) {
 
   return (
     <div className="candidate-wrap">
-      <div className="candidate-card">
+      <div className={`candidate-card ${away ? "away" : ""}`}>
         {error && <div className="error">{error}</div>}
+        {away && (
+          <div className="error">⚠ 시험 화면을 벗어났습니다. 감독관에게 기록됩니다.</div>
+        )}
 
         <div className="candidate-head">
           <div className="brand">

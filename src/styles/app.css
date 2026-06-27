@@ -260,3 +260,32 @@ body {
   padding: 6px 12px; border-radius: 8px; }
 .modal-none { margin: 14px 0 0; font-size: 14px; color: var(--txt-muted); }
 .modal-hint { margin: 16px 0 0; font-size: 12px; color: var(--txt-dim); }
+
+/* 점수 추이 스파크라인 */
+.modal-spark { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.modal-spark-head { display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; font-weight: 700; color: var(--txt-muted); margin-bottom: 8px; }
+.modal-spark-now { font-weight: 800; }
+.spark { width: 100%; height: 56px; display: block; background: var(--card-2); border-radius: 8px; }
+.spark-grid { stroke: var(--divider); stroke-width: 1; stroke-dasharray: 3 4; }
+.spark-empty { height: 56px; display: flex; align-items: center; justify-content: center;
+  background: var(--card-2); border-radius: 8px; color: var(--txt-dim); font-size: 13px; }
+
+/* 경고 토스트 */
+.toast-layer { position: fixed; right: 20px; bottom: 20px; z-index: 60;
+  display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
+.toast { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--red); cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); animation: toastin .18s ease; }
+@keyframes toastin { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.toast-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; font-size: 17px; background: rgba(242,63,67,.18); color: #ff8589; }
+.toast-body { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.toast-body b { font-size: 14px; font-weight: 700; }
+.toast-body span { font-size: 12px; color: var(--txt-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast-x { margin-left: auto; background: none; border: none; color: var(--txt-dim); cursor: pointer;
+  font-size: 13px; padding: 4px; }
+.toast-x:hover { color: var(--txt); }
+
+/* 응시자 이탈 상태 강조 */
+.candidate-card.away { box-shadow: 0 0 0 2px var(--red), 0 8px 24px rgba(0,0,0,.4); }
