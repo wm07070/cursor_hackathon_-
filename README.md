@@ -31,6 +31,29 @@ npm run serve
 - `src/detection/*` — 시선/머리자세/깜빡임 신호 → anomaly score
 - `public/mediapipe/*` — 로컬에서 서빙하는 WASM/모델 (오프라인 동작)
 
+## 배포 (공개 인터넷)
+
+이 앱은 **상시 WebSocket(Socket.IO) 서버**가 필요해서, 서버리스(Vercel)보다
+**WebSocket을 상시 지원하는 PaaS(Render/Railway/Fly.io)** 에 통째로 올리는 것이 가장 간단합니다.
+프로덕션(`NODE_ENV=production`)에서는 서버가 평문 HTTP로 listen하고, 플랫폼이 HTTPS를 종단 처리합니다.
+
+### Render (권장, 무료 티어)
+1. 이 저장소를 Render에 연결 (New → Web Service → 이 GitHub 저장소 선택)
+2. 설정은 저장소의 `render.yaml`이 자동 적용 (Build: `npm install && npm run build`, Start: `npm start`, `NODE_ENV=production`)
+3. 배포 후 발급되는 `https://<앱>.onrender.com` 주소를 공유
+   - 감독관: `https://<앱>.onrender.com/proctor`
+   - 응시자: `https://<앱>.onrender.com/`
+
+### Railway
+1. New Project → Deploy from GitHub repo
+2. Variables에 `NODE_ENV=production` 추가 (Nixpacks가 `npm run build` → `npm start` 자동 실행)
+
+### NAT 통과 (TURN)
+서로 다른 네트워크의 사용자 간 영상 연결을 위해 `src/rtc/config.js`에 공개 TURN(OpenRelay)이
+기본 포함돼 있습니다. 트래픽이 많거나 운영용이면 본인 TURN 자격증명(metered/Twilio/coturn)으로 교체하세요.
+
+> 참고: 무료 티어는 유휴 시 슬립 → 첫 접속이 수십 초 지연될 수 있습니다.
+
 ## 튜닝
 - 임계치: `src/detection/signals.js` (`gazeDev > 0.25`, `headDev > 0.35`)
 - 등급 경계: `src/detection/anomalyScore.js`의 `tier()` (30 / 60)

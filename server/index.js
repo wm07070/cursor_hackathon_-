@@ -4,6 +4,7 @@
 // - 응시자 anomaly score 브로드캐스트
 import express from "express";
 import https from "https";
+import http from "http";
 import os from "os";
 import fs from "fs";
 import { execFileSync } from "child_process";
@@ -15,6 +16,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(__dirname, "..", "dist");
 const CERT_DIR = path.join(__dirname, "certs");
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
+// 프로덕션(Render/Railway 등): 플랫폼이 HTTPS를 종단 처리 → 앱은 평문 HTTP로 listen.
+// 로컬: 같은 와이파이 기기 카메라용으로 자체서명 HTTPS 사용.
+const PROD = process.env.NODE_ENV === "production";
 
 const app = express();
 app.use(express.static(DIST));
@@ -39,7 +43,7 @@ function ensureCerts() {
   return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
 }
 
-const server = https.createServer(ensureCerts(), app);
+const server = PROD ? http.createServer(app) : https.createServer(ensureCerts(), app);
 
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -120,6 +124,10 @@ function lanIPs() {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
+  if (PROD) {
+    console.log(`\n  ExamGuard 서버 (프로덕션/HTTP) — 포트 ${PORT} 리스닝\n`);
+    return;
+  }
   const ips = lanIPs();
   console.log("\n  ExamGuard 풀버전 서버 (HTTPS)\n");
   console.log(`  감독관(이 PC):  https://localhost:${PORT}/proctor`);
