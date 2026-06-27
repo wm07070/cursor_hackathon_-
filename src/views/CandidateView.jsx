@@ -1,0 +1,205 @@
+import { useEffect, useRef, useState } from "react";
+import { io } from "socket.io-client";
+import { RTC_CONF } from "../rtc/config.js";
+import { createFaceLandmarker, detectFrame } from "../detection/faceLandmarker.js";
+import { createCalibrator } from "../detection/calibration.js";
+import { createSignalTracker } from "../detection/signals.js";
+import { computeScore, tier, reasonTags } from "../detection/anomalyScore.js";
+import StatusBadge from "../components/StatusBadge.jsx";
+import ReasonTags from "../components/ReasonTags.jsx";
+
+export default function CandidateView({ name }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const socketRef = useRef(null);
+  const pcRef = useRef(null);
+  const latestRef = useRef({ score: 0, tier: "green", tags: [] });
+  const manualRef = useRef({ glasses: false, capture: false });
+
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
+  const [calibrating, setCalibrating] = useState(true);
+  const [calibProgress, setCalibProgress] = useState(0);
+  const [state, setState] = useState({ score: 0, tier: "green", tags: [] });
+  const [connected, setConnected] = useState(false);
+  const [manual, setManual] = useState({ glasses: false, capture: false });
+
+  // 1) 웹캠
+  useEffect(() => {
+    let stream;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: "user" },
+          audio: false,
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setReady(true);
+        }
+      } catch (e) {
+        setError(e.message);
+      }
+    })();
+    return () => stream?.getTracks().forEach((t) => t.stop());
+  }, []);
+
+  // 2) 시그널링 + WebRTC (응시자가 감독관에게 offer)
+  useEffect(() => {
+    if (!ready) return;
+    const socket = io();
+    socketRef.current = socket;
+    socket.emit("join", { role: "candidate", name });
+
+    const makeOffer = async () => {
+      pcRef.current?.close();
+      const pc = new RTCPeerConnection(RTC_CONF);
+      pcRef.current = pc;
+      streamRef.current.getTracks().forEach((t) => pc.addTrack(t, streamRef.current));
+      pc.onicecandidate = (e) => {
+        if (e.candidate) socket.emit("rtc:ice", { candidate: e.candidate });
+      };
+      pc.onconnectionstatechange = () =>
+        setConnected(pc.connectionState === "connected");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("rtc:offer", { sdp: pc.localDescription });
+    };
+
+    socket.on("proctor:status", ({ online }) => online && makeOffer());
+    socket.on("proctor:online", () => makeOffer());
+    socket.on("rtc:answer", async ({ sdp }) => {
+      try {
+        await pcRef.current?.setRemoteDescription(sdp);
+      } catch (e) {
+        console.warn("setRemoteDescription 실패", e);
+      }
+    });
+    socket.on("rtc:ice", async ({ candidate }) => {
+      try {
+        await pcRef.current?.addIceCandidate(candidate);
+      } catch {
+        /* noop */
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      pcRef.current?.close();
+    };
+  }, [ready, name]);
+
+  // 3) 감지 루프 (로컬에서 MediaPipe 분석)
+  useEffect(() => {
+    if (!ready) return;
+    let raf,
+      landmarker,
+      stopped = false;
+    const calibrator = createCalibrator(8000);
+    const track = createSignalTracker(4000);
+
+    (async () => {
+      try {
+        landmarker = await createFaceLandmarker();
+      } catch (e) {
+        setError(`얼굴 인식 모델 로딩 실패: ${e.message}`);
+        return;
+      }
+      const loop = () => {
+        if (stopped) return;
+        const video = videoRef.current;
+        if (video && video.readyState >= 2) {
+          const ts = performance.now();
+          const frame = detectFrame(landmarker, video, ts);
+          if (!calibrator.ready) {
+            calibrator.feed(frame, ts);
+            setCalibProgress(calibrator.progress(ts));
+            if (calibrator.ready) setCalibrating(false);
+          } else {
+            const signals = track(frame, calibrator.baseline, ts, manualRef.current);
+            const score = computeScore(signals);
+            const t = tier(score);
+            const tags = reasonTags(signals);
+            latestRef.current = { score, tier: t, tags };
+            setState({ score, tier: t, tags });
+          }
+        }
+        raf = requestAnimationFrame(loop);
+      };
+      loop();
+    })();
+
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      landmarker?.close?.();
+    };
+  }, [ready]);
+
+  // 4) 점수 주기 전송
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const s = socketRef.current;
+      if (s && s.connected) {
+        const { score, tier, tags } = latestRef.current;
+        s.emit("score", { name, score, tier, tags });
+      }
+    }, 400);
+    return () => clearInterval(iv);
+  }, [name]);
+
+  const toggle = (k) => {
+    const next = { ...manualRef.current, [k]: !manualRef.current[k] };
+    manualRef.current = next;
+    setManual(next);
+  };
+
+  return (
+    <div className="candidate-wrap">
+      {error && <div className="error">웹캠 접근 실패: {error}</div>}
+
+      <div className="candidate-card">
+        <div className="candidate-head">
+          <div className="brand">
+            ExamGuard <span className="sub">· 응시자</span>
+          </div>
+          <span className={`conn ${connected ? "on" : ""}`}>
+            {connected ? "감독관 연결됨" : "연결 대기"}
+          </span>
+        </div>
+
+        <div className="candidate-video">
+          <video ref={videoRef} muted playsInline autoPlay className="cam" />
+          {calibrating && (
+            <div className="calib-overlay">
+              기준선 보정 중… {Math.round(calibProgress * 100)}%
+              <small>정상 상태로 화면을 봐주세요</small>
+            </div>
+          )}
+        </div>
+
+        <div className="candidate-status">
+          <span className="name">{name}</span>
+          <StatusBadge tier={state.tier} score={state.score} />
+        </div>
+        <ReasonTags tags={state.tags} />
+
+        <div className="candidate-demo">
+          <span>데모 토글:</span>
+          <button className={manual.glasses ? "on" : ""} onClick={() => toggle("glasses")}>
+            안경 착용 {manual.glasses ? "ON" : "OFF"}
+          </button>
+          <button className={manual.capture ? "on" : ""} onClick={() => toggle("capture")}>
+            캡처 제스처 {manual.capture ? "ON" : "OFF"}
+          </button>
+        </div>
+
+        <p className="candidate-note">
+          이 화면을 켜둔 채로 시험을 진행하세요. 영상과 점수가 감독관에게 실시간 전송됩니다.
+        </p>
+      </div>
+    </div>
+  );
+}
